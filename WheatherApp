@@ -1,0 +1,100 @@
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.Scanner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+// Classe qui représente une météo
+class Meteo {
+    private String ville;
+    private double temperature;
+    private double vent;
+    private int code;
+
+    public Meteo(String ville, double temperature, double vent, int code) {
+        this.ville = ville;
+        this.temperature = temperature;
+        this.vent = vent;
+        this.code = code;
+    }
+
+    public String getDescription() {
+        if (code == 0) return "Ciel dégagé";
+        if (code <= 3) return "Partiellement nuageux";
+        if (code <= 48) return "Brouillard";
+        if (code <= 67) return "Pluie";
+        if (code <= 77) return "Neige";
+        if (code <= 82) return "Averses";
+        return "Orage";
+    }
+
+    public void afficher() {
+        System.out.println("\n=== Météo à " + ville + " ===");
+        System.out.println("Température : " + temperature + " °C");
+        System.out.println("Vent        : " + vent + " km/h");
+        System.out.println("Conditions  : " + getDescription());
+    }
+}
+
+// Classe qui appelle l'API
+class ServiceMeteo {
+    private HttpClient client = HttpClient.newHttpClient();
+
+    private String get(String url) throws Exception {
+        HttpRequest requete = HttpRequest.newBuilder().uri(URI.create(url)).build();
+        return client.send(requete, HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    // Cherche un nombre associé à une clé dans le JSON
+    private double extraire(String json, String cle) {
+        Matcher m = Pattern.compile("\"" + cle + "\":\\s*(-?[0-9.]+)").matcher(json);
+        if (m.find()) return Double.parseDouble(m.group(1));
+        throw new RuntimeException("Donnée introuvable : " + cle);
+    }
+
+    public Meteo obtenirMeteo(String ville) throws Exception {
+        // 1) Trouver les coordonnées de la ville
+        String nom = URLEncoder.encode(ville, StandardCharsets.UTF_8);
+        String geo = get("https://geocoding-api.open-meteo.com/v1/search?name=" + nom + "&count=1");
+        if (!geo.contains("\"results\"")) {
+            throw new RuntimeException("Ville introuvable : " + ville);
+        }
+        double lat = extraire(geo, "latitude");
+        double lon = extraire(geo, "longitude");
+
+        // 2) Récupérer la météo actuelle
+        String json = get("https://api.open-meteo.com/v1/forecast?latitude=" + lat
+                + "&longitude=" + lon + "&current_weather=true");
+
+        double temp = extraire(json, "temperature");
+        double vent = extraire(json, "windspeed");
+        int code = (int) extraire(json, "weathercode");
+
+        return new Meteo(ville, temp, vent, code);
+    }
+}
+
+// Programme principal
+public class AppMeteo {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        ServiceMeteo service = new ServiceMeteo();
+
+        while (true) {
+            System.out.print("\nVille (ou 'q' pour quitter) : ");
+            String ville = sc.nextLine().trim();
+            if (ville.equalsIgnoreCase("q")) break;
+
+            try {
+                service.obtenirMeteo(ville).afficher();
+            } catch (Exception e) {
+                System.out.println("Erreur : " + e.getMessage());
+            }
+        }
+        System.out.println("Au revoir !");
+    }
+}
